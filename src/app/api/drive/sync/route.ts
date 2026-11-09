@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
           thumbnail: defaultThumbnail,
           status: isPersonalMode ? "READY_FOR_UPLOAD" : "PENDING",
           userId: user.id,
-          assignedChannelId: isPersonalMode ? user.personalYouTubeChannelId : undefined,
+          assignedChannelId: isPersonalMode ? user.personalYouTubeChannelId : user.assignedChannelId,
           driveFileId: driveVideo.id,
           isAiGenerated: true,
         },

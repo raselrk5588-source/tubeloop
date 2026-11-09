@@ -35,8 +35,8 @@ jobs:
             git fetch origin
             git checkout ${{ github.ref_name }}
             git reset --hard origin/${{ github.ref_name }}
-            # Clean untracked files but preserve SQLite database and .env file
-            git clean -fd -e .env -e dev.db -e "*.db"
+            # Clean untracked files but preserve SQLite database, .env file, and uploaded videos
+            git clean -fd -e .env -e dev.db -e "*.db" -e "public/uploads*"
             
             # Create default .env if not exists
             if [ ! -f .env ]; then

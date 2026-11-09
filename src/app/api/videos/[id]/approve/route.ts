@@ -30,7 +30,15 @@ export async function POST(
 
     const video = await prisma.video.findUnique({
       where: { id: videoId },
-      include: { assignedChannel: true }
+      include: {
+        assignedChannel: true,
+        user: {
+          include: {
+            assignedChannel: true,
+            personalYouTubeChannel: true,
+          }
+        }
+      }
     });
 
     if (!video) {
@@ -41,12 +49,30 @@ export async function POST(
       return NextResponse.json({ error: "Video cannot be approved in its current state" }, { status: 400 });
     }
 
-    const channel = video.assignedChannel;
-    if (!channel || !channel.accessToken || !channel.refreshToken) {
+    // Resolve channel: video's assigned channel -> user's assigned channel -> user's personal channel -> any connected channel
+    let channel = video.assignedChannel || video.user?.assignedChannel || video.user?.personalYouTubeChannel;
+
+    if (!channel) {
+      channel = await prisma.youTubeChannel.findFirst({
+        where: { status: "CONNECTED" },
+        orderBy: { connectedDate: "desc" }
+      });
+    }
+
+    if (!channel || (!channel.accessToken && !channel.refreshToken)) {
       return NextResponse.json({ error: "Assigned YouTube channel is missing or not fully connected" }, { status: 400 });
     }
 
-    const filePath = path.join(process.cwd(), "public", video.fileUrl);
+    // Bind this channel to the video if it wasn't set
+    if (video.assignedChannelId !== channel.id) {
+      await prisma.video.update({
+        where: { id: video.id },
+        data: { assignedChannelId: channel.id }
+      });
+    }
+
+    const relativePath = video.fileUrl.startsWith('/') ? video.fileUrl.slice(1) : video.fileUrl;
+    const filePath = path.join(process.cwd(), "public", relativePath);
     
     if (!fs.existsSync(filePath)) {
        return NextResponse.json({ error: "Video file not found on disk" }, { status: 404 });
