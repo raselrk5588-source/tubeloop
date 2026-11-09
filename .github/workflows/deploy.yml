@@ -51,6 +51,12 @@ jobs:
             EOF
             fi
 
+            # Ensure build-essential is available for native node modules
+            if ! command -v make &> /dev/null; then
+              echo "Installing build-essential..."
+              apt-get update && apt-get install -y build-essential python3
+            fi
+
             # Ensure PM2 is installed globally
             if ! command -v pm2 &> /dev/null; then
               echo "Installing PM2 globally..."
