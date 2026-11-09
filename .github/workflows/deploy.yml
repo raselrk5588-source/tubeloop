@@ -1,0 +1,153 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            set -e
+
+            mkdir -p /var/www/rasel
+            cd /var/www/rasel
+            
+            # If the folder doesn't exist, clone it
+            if [ ! -d "tubeloop" ]; then
+              git clone https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git tubeloop
+            fi
+            
+            cd tubeloop
+            git config --global --add safe.directory /var/www/rasel/tubeloop
+            # Update remote with current action token to prevent auth errors
+            git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+            
+            git fetch origin
+            git checkout ${{ github.ref_name }}
+            git reset --hard origin/${{ github.ref_name }}
+            # Clean untracked files but preserve SQLite database and .env file
+            git clean -fd -e .env -e dev.db -e "*.db"
+            
+            # Create default .env if not exists
+            if [ ! -f .env ]; then
+              echo "Creating initial .env configuration..."
+              cat << 'EOF' > .env
+            DATABASE_URL="file:./dev.db"
+            NEXTAUTH_SECRET="tubeloop_$(openssl rand -hex 16)"
+            NEXTAUTH_URL="https://tubeloop.vxsbd.com"
+            NEXT_PUBLIC_APP_URL="https://tubeloop.vxsbd.com"
+            STORAGE_PROVIDER="local"
+            PORT=3055
+            EOF
+            fi
+
+            # Ensure PM2 is installed globally
+            if ! command -v pm2 &> /dev/null; then
+              echo "Installing PM2 globally..."
+              npm install -g pm2
+            fi
+            
+            # Install all dependencies (including devDependencies required for Next.js build)
+            echo "Installing dependencies..."
+            npm install --production=false
+            
+            echo "Generating Prisma Client..."
+            npx prisma generate
+            
+            echo "Applying Prisma DB schema..."
+            npx prisma db push --skip-generate
+            
+            echo "Building Next.js application..."
+            npm run build
+            
+            # Restart or start PM2 process (isolated on port 3055 to avoid conflicts)
+            echo "Starting/Reloading PM2 application..."
+            if pm2 describe tubeloop > /dev/null 2>&1; then
+              pm2 reload ecosystem.config.cjs --update-env
+            else
+              pm2 start ecosystem.config.cjs
+            fi
+            pm2 save
+            
+            # Nginx Configuration (Reverse Proxy to isolated port 3055)
+            NGINX_CONF="/etc/nginx/sites-available/tubeloop.vxsbd.com"
+            
+            if [ -f "/etc/letsencrypt/live/tubeloop.vxsbd.com/fullchain.pem" ]; then
+              echo "Configuring Nginx with existing SSL..."
+              cat << 'EOF' > $NGINX_CONF
+            server {
+                listen 80;
+                server_name tubeloop.vxsbd.com;
+                return 301 https://$host$request_uri;
+            }
+
+            server {
+                listen 443 ssl http2;
+                server_name tubeloop.vxsbd.com;
+
+                ssl_certificate /etc/letsencrypt/live/tubeloop.vxsbd.com/fullchain.pem;
+                ssl_certificate_key /etc/letsencrypt/live/tubeloop.vxsbd.com/privkey.pem;
+                include /etc/letsencrypt/options-ssl-nginx.conf;
+                ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+                client_max_body_size 500M;
+
+                location / {
+                    proxy_pass http://127.0.0.1:3055;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Connection 'upgrade';
+                    proxy_set_header Host $host;
+                    proxy_cache_bypass $http_upgrade;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                }
+            }
+            EOF
+            else
+              echo "Configuring Nginx HTTP reverse proxy..."
+              cat << 'EOF' > $NGINX_CONF
+            server {
+                listen 80;
+                server_name tubeloop.vxsbd.com;
+
+                client_max_body_size 500M;
+
+                location / {
+                    proxy_pass http://127.0.0.1:3055;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Connection 'upgrade';
+                    proxy_set_header Host $host;
+                    proxy_cache_bypass $http_upgrade;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                }
+            }
+            EOF
+              ln -sf $NGINX_CONF /etc/nginx/sites-enabled/
+              nginx -t && systemctl reload nginx
+              
+              echo "Requesting SSL certificate with Certbot..."
+              if ! command -v certbot &> /dev/null; then
+                apt-get update
+                apt-get install -y certbot python3-certbot-nginx
+              fi
+              certbot --nginx --non-interactive --agree-tos -m admin@vxsbd.com -d tubeloop.vxsbd.com
+            fi
+            
+            ln -sf $NGINX_CONF /etc/nginx/sites-enabled/
+            nginx -t && systemctl reload nginx
+            echo "Deployment completed successfully!"

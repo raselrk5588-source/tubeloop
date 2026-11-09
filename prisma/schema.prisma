@@ -1,0 +1,145 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  password      String
+  role          String    @default("USER") // USER, ADMIN
+  status        String    @default("ACTIVE") // ACTIVE, SUSPENDED
+  isApproved    Boolean   @default(false)
+  bKashNumber   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accountMode           String    @default("PLATFORM") // PLATFORM, PERSONAL
+  personalYouTubeChannelId String?
+  personalYouTubeChannel   YouTubeChannel? @relation("PersonalChannel", fields: [personalYouTubeChannelId], references: [id])
+
+  driveFolderId         String?
+  driveSyncEnabled      Boolean   @default(false)
+  driveWarmupEnabled    Boolean   @default(true)
+  uploadIntervalHours   Int       @default(5)
+  uploadScheduleTimes   String    @default("10:00,13:30,16:00,18:30,20:30,21:00,22:00,00:30,02:00")
+  defaultVideoDescription String?
+  lastUploadTime        DateTime?
+  driveAccessToken      String?
+  driveRefreshToken     String?
+
+  videos        Video[]
+  earnings      Earning[]
+  withdrawals   Withdrawal[]
+  notifications Notification[]
+  
+  assignedChannelId String?
+  assignedChannel   YouTubeChannel? @relation(fields: [assignedChannelId], references: [id])
+}
+
+model YouTubeChannel {
+  id            String    @id @default(cuid())
+  name          String
+  channelId     String    @unique
+  accessToken   String?   
+  refreshToken  String?   
+  status        String    @default("CONNECTED") // CONNECTED, DISCONNECTED, ERROR
+  connectedDate DateTime  @default(now())
+  lastUpload    DateTime?
+  ownerId       String?   // If set, this channel belongs to a specific user (Personal Automation Mode)
+
+  users         User[]
+  personalUsers User[]    @relation("PersonalChannel")
+  videos        Video[]
+  uploadLogs    UploadLog[]
+}
+
+model Video {
+  id              String      @id @default(cuid())
+  title           String
+  description     String?     
+  tags            String?
+  category        String?
+  thumbnail       String?
+  fileUrl         String
+  status          String      @default("PENDING") // PENDING, APPROVED, REJECTED, UPLOADED, UPLOAD_FAILED
+  rejectionReason String?     
+  youtubeVideoId  String?
+  driveFileId     String?     @unique
+  isAiGenerated   Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  userId          String
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  assignedChannelId String?
+  assignedChannel   YouTubeChannel? @relation(fields: [assignedChannelId], references: [id], onDelete: SetNull)
+
+  earning         Earning?
+  uploadLogs      UploadLog[]
+}
+
+model Earning {
+  id        String   @id @default(cuid())
+  amount    Float
+  date      DateTime @default(now())
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  videoId   String   @unique
+  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+}
+
+model Withdrawal {
+  id            String           @id @default(cuid())
+  amount        Float
+  bKashNumber   String
+  status        String           @default("PENDING") // PENDING, PROCESSING, PAID, REJECTED
+  transactionId String?
+  paymentDate   DateTime?
+  requestDate   DateTime         @default(now())
+  
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UploadLog {
+  id           String       @id @default(cuid())
+  status       String       @default("QUEUED") // QUEUED, UPLOADING, SUCCESS, FAILED
+  errorMessage String?      
+  retryCount   Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  videoId      String
+  video        Video        @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  channelId    String
+  channel      YouTubeChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?  // If null, it's a global or admin-only notification
+  title     String
+  message   String
+  type      String   @default("INFO") // INFO, SUCCESS, WARNING, ERROR
+  isRead    Boolean  @default(false)
+  link      String?  // Optional link to click through (e.g. /admin/videos)
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SystemSetting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String 
+}
