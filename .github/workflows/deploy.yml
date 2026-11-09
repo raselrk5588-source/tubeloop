@@ -66,6 +66,9 @@ jobs:
             # Install all dependencies (including devDependencies required for Next.js build)
             echo "Installing dependencies..."
             npm install --production=false
+
+            echo "Rebuilding native addons..."
+            npm rebuild better-sqlite3 bcrypt
             
             echo "Generating Prisma Client..."
             npx prisma generate
