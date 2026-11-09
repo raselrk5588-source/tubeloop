@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOAuth2Client, youtube } from '@/lib/google';
+import { getOAuth2Client, youtube, getBaseUrl } from '@/lib/google';
 import prisma from '@/lib/prisma';
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
+  const baseUrl = getBaseUrl();
   const searchParams = req.nextUrl.searchParams;
   const code = searchParams.get('code');
   const error = searchParams.get('error');
@@ -14,11 +15,11 @@ export async function GET(req: NextRequest) {
 
   if (error) {
     console.error('Google OAuth Error:', error);
-    return NextResponse.redirect(new URL('/admin/channels?error=oauth_failed', req.url));
+    return NextResponse.redirect(new URL('/admin/channels?error=oauth_failed', baseUrl));
   }
 
   if (!code) {
-    return NextResponse.redirect(new URL('/admin/channels?error=no_code', req.url));
+    return NextResponse.redirect(new URL('/admin/channels?error=no_code', baseUrl));
   }
 
   try {
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest) {
     const channels = response.data.items;
     
     if (!channels || channels.length === 0) {
-      return NextResponse.redirect(new URL('/admin/channels?error=no_channel_found', req.url));
+      return NextResponse.redirect(new URL('/admin/channels?error=no_channel_found', baseUrl));
     }
 
     const channelInfo = channels[0];
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
 
     if (isPersonal) {
       if (!session || !session.user) {
-        return NextResponse.redirect(new URL('/dashboard/profile?error=unauthorized', req.url));
+        return NextResponse.redirect(new URL('/dashboard/profile?error=unauthorized', baseUrl));
       }
       ownerId = (session.user as any).id;
     }
@@ -88,13 +89,13 @@ export async function GET(req: NextRequest) {
           accountMode: 'PERSONAL',
         },
       });
-      return NextResponse.redirect(new URL('/dashboard/profile?success=youtube_connected', req.url));
+      return NextResponse.redirect(new URL('/dashboard/profile?success=youtube_connected', baseUrl));
     }
 
-    return NextResponse.redirect(new URL('/admin/channels?success=true', req.url));
+    return NextResponse.redirect(new URL('/admin/channels?success=true', baseUrl));
   } catch (error: any) {
     console.error('Error during Google OAuth callback:', error);
     const errorMessage = error instanceof Error ? error.message : String(error);
-    return NextResponse.redirect(new URL(`/admin/channels?error=server_error&details=${encodeURIComponent(errorMessage)}`, req.url));
+    return NextResponse.redirect(new URL(`/admin/channels?error=server_error&details=${encodeURIComponent(errorMessage)}`, baseUrl));
   }
 }
