@@ -72,6 +72,9 @@ jobs:
             
             echo "Applying Prisma DB schema..."
             npx prisma db push --accept-data-loss
+
+            echo "Ensuring default admin account exists..."
+            node prisma/seed-admin.cjs
             
             echo "Building Next.js application..."
             npm run build
